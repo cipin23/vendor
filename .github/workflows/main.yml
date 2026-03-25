@@ -1,14 +1,20 @@
-name: Build update-binary (ARM32) - STRIKE 3 (Smart Bridge)
+name: Build update-binary (ARM32) - THE FINAL BOSS FIX
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-smart-bridge:
+  build-final:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: 🧹 Cleanup Log & Repo
+        run: |
+          CURRENT_RUN_ID="${{ github.run_id }}"
+          gh run list --limit 50 --json databaseId -q '.[].databaseId' | grep -v "$CURRENT_RUN_ID" | xargs -I{} gh run delete {} || echo "Clean."
+          find . -maxdepth 1 ! -name '.git' ! -name '.github' ! -name 'vendor.tar.gz' ! -name '.' -exec rm -rf {} +
 
       - name: Setup NDK (r25c)
         run: |
@@ -16,54 +22,56 @@ jobs:
           unzip -q android-ndk-r25c-linux.zip
           echo "NDK=${{ github.workspace }}/android-ndk-r25c" >> $GITHUB_ENV
 
-      - name: ✍️ Create Smart Updater Source
+      - name: ✍️ Create Smart Bridge Source
         run: |
           cat <<EOF > update_binary.c
           #include <stdio.h>
           #include <stdlib.h>
           #include <string.h>
           #include <unistd.h>
+          #include <sys/stat.h>
 
           int main(int argc, char** argv) {
               if (argc < 4) return 1;
+              char* pipe_fd = argv[2];
+              char* zip_path = argv[3];
+              char cmd[1024];
 
-              char* zip_path = argv[3]; // Path file ZIP ada di argumen ke-4
-              char cmd[512];
-
-              printf("Pabrik Rujak Bebeg v3.0 starting...\n");
-              printf("ZIP: %s\n", zip_path);
-
-              // 1. Ekstrak file 'install.sh' dari dalem ZIP ke /tmp/
-              // Kita pake unzip bawaan recovery
-              sprintf(cmd, "/sbin/unzip -o %s install.sh -d /tmp/", zip_path);
-              system(cmd);
-
-              // 2. Kasih ijin eksekusi
-              system("chmod 755 /tmp/install.sh");
-
-              // 3. Jalankan script-nya dan oper argumen ZIP-nya
-              printf("Executing install.sh...\n");
-              sprintf(cmd, "/sbin/sh /tmp/install.sh %s", zip_path);
-              int res = system(cmd);
-
-              if (res == 0) {
-                  printf("Instalasi Selesai dengan Mantap!\n");
-              } else {
-                  printf("Instalasi Gagal Total, Cek Lagi Brooh!\n");
+              printf("--- RUJAK BEBEG FINAL ENGINE ---\n");
+              
+              // Ekstrak updater.sh dari ZIP
+              sprintf(cmd, "/sbin/unzip -o %s \"META-INF/com/google/android/updater.sh\" -j -d /tmp", zip_path);
+              if (system(cmd) != 0) {
+                  printf("Gagal ekstrak updater.sh! Cek isi ZIP loe.\n");
+                  return 1;
               }
 
-              return res;
+              chmod("/tmp/updater.sh", 0755);
+
+              // Eksekusi script utama
+              sprintf(cmd, "/sbin/sh /tmp/updater.sh %s %s %s", zip_path, pipe_fd, argv[1]);
+              return system(cmd);
           }
           EOF
 
-      - name: 🏗️ Build Static Binary
+      - name: 🏗️ Build Static Binary (Fix Strip)
         run: |
-          export CC=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi30-clang
+          # Set path toolchain biar rapi
+          TOOLCHAIN_PATH=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin
+          CC=$TOOLCHAIN_PATH/armv7a-linux-androideabi30-clang
+          STRIP=$TOOLCHAIN_PATH/llvm-strip
+          
+          # Compile Statis
           $CC -O3 -static update_binary.c -o update-binary
-          strip update-binary
+          
+          # Pake STRIP punya NDK, jangan punya Ubuntu!
+          $STRIP update-binary
+          
+          echo "✅ Build Sukses!"
+          ls -lh update-binary
 
-      - name: Upload
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: update-binary-strike3
+          name: update-binary-final-v2
           path: update-binary
