@@ -1,46 +1,60 @@
-name: Build update-binary (ARM32) - RUJAK BEBEG LEVEL 10
+name: Build update-binary (ARM32) - RUJAK BEBEG LEVEL 15
 
 on:
   workflow_dispatch:
 
+permissions:
+  actions: write
+  contents: read
+
 jobs:
-  build:
+  clean-and-build:
     runs-on: ubuntu-22.04
 
     steps:
+      - name: 🧹 Clean Old Workflow Runs
+        uses: babbel/action-delete-workflow-runs@v1
+        with:
+          github_token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: 0
+          keep_minimum_runs: 0
+
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git cmake ninja-build python3 libssl-dev pkg-config brotli libbrotli-dev zlib1g-dev liblzma-dev
+          sudo apt-get install -y git cmake ninja-build python3 libssl-dev pkg-config
 
       - name: Setup Android NDK (r25c)
         run: |
-          # Ganti ke r25c sesuai request, siapa tau emang r23b udah gak kuat nahan pedes
           wget -q https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
           unzip -q android-ndk-r25c-linux.zip
           echo "NDK=${{ github.workspace }}/android-ndk-r25c" >> $GITHUB_ENV
 
-      - name: Clone AOSP Repositories (Android 12)
+      - name: Clone AOSP Repositories (Strict Android 12)
         run: |
           BRANCH="android12-release"
           URL="https://android.googlesource.com/platform"
+          
+          # Repo Utama
           git clone --depth=1 --branch $BRANCH $URL/bootable/recovery recovery
           git clone --depth=1 --branch $BRANCH $URL/system/libbase libbase
           git clone --depth=1 --branch $BRANCH $URL/system/logging logging
           git clone --depth=1 --branch $BRANCH $URL/system/libziparchive libziparchive
           git clone --depth=1 --branch $BRANCH $URL/system/core core
-          git clone --depth=1 --branch $BRANCH $URL/system/extras extras
-          git clone --depth=1 --branch $BRANCH $URL/external/selinux selinux
+          
+          # Repo External (Biang kerok error header)
           git clone --depth=1 --branch $BRANCH $URL/external/boringssl boringssl
+          git clone --depth=1 --branch $BRANCH $URL/external/brotli brotli
+          git clone --depth=1 --branch $BRANCH $URL/external/lzma lzma
           git clone --depth=1 --branch $BRANCH $URL/external/zlib zlib
-          git clone --depth=1 --branch $BRANCH $URL/external/libcxx libcxx
+          git clone --depth=1 --branch $BRANCH $URL/external/selinux selinux
 
       - name: Create Dummy & Fix Headers
         run: |
-          # Bypass gtest & fix missing defines buat liblog
           mkdir -p fake_headers/gtest
           mkdir -p fake_headers/utils
           echo "#define FRIEND_TEST(a, b)" > fake_headers/gtest/gtest_prod.h
@@ -57,11 +71,13 @@ jobs:
           
           mkdir -p build_out
 
-          # Filter file .cpp: Buang yang bau-bau windows, test, dan simulator
+          # Cari source, buang yang bikin error
           RECOVERY_SRCS=$(find recovery/updater recovery/otautil recovery/applypatch recovery/edify -name "*.cpp" | grep -vE "test|simulator|target_files" | tr '\n' ' ')
           BASE_SRCS=$(find libbase logging/liblog libziparchive -name "*.cpp" -o -name "*.c" | grep -vE "test|benchmark|windows|fuzz|incfs" | tr '\n' ' ')
           
-          # Hajar pake include yang komplit banget sampe ke akarnya
+          # Tambahin source brotli & lzma biar link statisnya komplit
+          BROTLI_SRCS=$(find brotli/c/common brotli/c/dec -name "*.c" | tr '\n' ' ')
+          
           $CXX -O2 -std=c++17 -static \
             -DANDROID -DANDROID_API=30 \
             -DRECOVERY_API_VERSION=3 \
@@ -78,14 +94,14 @@ jobs:
             -I libbase/include \
             -I logging/liblog/include \
             -I core/libcutils/include \
-            -I core/libsparse/include \
-            -I extras/liblp/include \
             -I libziparchive/include \
-            -I selinux/libselinux/include \
             -I boringssl/src/include \
+            -I brotli/c/include \
+            -I lzma/src/liblzma/api \
             -I zlib \
             $RECOVERY_SRCS \
             $BASE_SRCS \
+            $BROTLI_SRCS \
             -lz -ldl -lc++_static \
             -o build_out/update-binary
 
@@ -95,5 +111,5 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: update-binary-pedes-mampus
+          name: update-binary-rujak-bebeg-final
           path: build_out/update-binary
