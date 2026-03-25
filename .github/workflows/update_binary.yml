@@ -1,4 +1,4 @@
-name: Build update-binary (ARM32 Android 11) - PENSIUN DINI
+name: Build update-binary (ARM32 Android 11) - MASTER BAKPAO
 
 on:
   workflow_dispatch:
@@ -18,19 +18,29 @@ jobs:
 
       - name: Setup Android NDK (r23b)
         run: |
-          # Pake NDK r23b biar aman dari error fdsan
           wget -q https://dl.google.com/android/repository/android-ndk-r23b-linux.zip
           unzip -q android-ndk-r23b-linux.zip
           echo "NDK=${{ github.workspace }}/android-ndk-r23b" >> $GITHUB_ENV
 
-      - name: Clone AOSP Repositories (MASTER BRANCH FIX)
+      - name: Clone AOSP Repositories (Strict Android 11)
         run: |
-          # Recovery doang yang pake r48, sisanya losin ke master biar gak error Not Found!
-          git clone --depth=1 --branch android-11.0.0_r48 https://android.googlesource.com/platform/bootable/recovery recovery
-          git clone --depth=1 https://android.googlesource.com/platform/system/libbase libbase
-          git clone --depth=1 https://android.googlesource.com/platform/system/logging logging
-          git clone --depth=1 https://android.googlesource.com/platform/system/libziparchive libziparchive
-          git clone --depth=1 https://android.googlesource.com/platform/system/extras extras
+          # Pake android11-release biar SEMUA repo sinkron di API 30
+          BRANCH="android11-release"
+          git clone --depth=1 --branch $BRANCH https://android.googlesource.com/platform/bootable/recovery recovery
+          git clone --depth=1 --branch $BRANCH https://android.googlesource.com/platform/system/core core
+          git clone --depth=1 --branch $BRANCH https://android.googlesource.com/platform/system/libbase libbase
+          git clone --depth=1 --branch $BRANCH https://android.googlesource.com/platform/system/logging logging
+          git clone --depth=1 --branch $BRANCH https://android.googlesource.com/platform/system/libziparchive libziparchive
+          git clone --depth=1 --branch $BRANCH https://android.googlesource.com/platform/system/extras extras
+          git clone --depth=1 --branch $BRANCH https://android.googlesource.com/platform/external/selinux selinux
+          git clone --depth=1 --branch $BRANCH https://android.googlesource.com/platform/external/bsdiff bsdiff
+
+      - name: Create Dummy Headers for Bypass
+        run: |
+          # Ngebypass error 'gtest/gtest_prod.h' tanpa harus narik full repo testing Google
+          mkdir -p fake_headers/gtest
+          echo "#define FRIEND_TEST(test_case_name, test_name)" > fake_headers/gtest/gtest_prod.h
+          echo "#define EXPECT_EQ(a, b)" > fake_headers/gtest/gtest.h
 
       - name: Build update-binary
         run: |
@@ -40,24 +50,30 @@ jobs:
           
           mkdir -p build_out
 
-          # Udah pake libbase/*.cpp dan path include yang bener
+          # FILTER CERDAS: Ambil .cpp tapi BUANG semua test, benchmark, dan windows
+          RECOVERY_SRCS=$(find recovery/updater recovery/otautil recovery/applypatch recovery/edify -name "*.cpp" 2>/dev/null | grep -v "test" | tr '\n' ' ')
+          CORE_SRCS=$(find core/libcutils libbase logging/liblog libziparchive -name "*.cpp" -o -name "*.cc" 2>/dev/null | grep -v "test" | grep -v "benchmark" | grep -v "windows" | grep -v "fuzz" | tr '\n' ' ')
+          
           $CXX -O2 -std=c++17 -static \
             -DANDROID -DANDROID_API=30 \
             -DRECOVERY_API_VERSION=3 \
             -D_FILE_OFFSET_BITS=64 \
             -I . \
+            -I fake_headers \
             -I recovery \
             -I recovery/updater/include \
             -I recovery/otautil/include \
+            -I recovery/edify/include \
+            -I core/libcutils/include \
             -I libbase/include \
-            -I logging/log/include \
+            -I logging/liblog/include \
             -I extras/liblp/include \
             -I libziparchive/include \
-            recovery/updater/*.cpp \
-            recovery/otautil/*.cpp \
-            recovery/applypatch/*.cpp \
-            libbase/*.cpp \
-            -lz -ldl -lc++_static \
+            -I selinux/libselinux/include \
+            -I bsdiff/include \
+            $RECOVERY_SRCS \
+            $CORE_SRCS \
+            -lz -ldl -lc++_static -lssl -lcrypto \
             -o build_out/update-binary
 
           $STRIP build_out/update-binary
