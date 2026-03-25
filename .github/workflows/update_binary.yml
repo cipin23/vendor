@@ -1,4 +1,4 @@
-name: Build update-binary (ARM32) - VERSI TUKANG PIJET
+name: Build update-binary (ARM32) - RUJAK BEBEG CABE 8
 
 on:
   workflow_dispatch:
@@ -18,34 +18,31 @@ jobs:
 
       - name: Setup Android NDK (r23b)
         run: |
+          # Tetep pake r23b biar aman dari penyakit fdsan di Samsung A02 loe
           wget -q https://dl.google.com/android/repository/android-ndk-r23b-linux.zip
           unzip -q android-ndk-r23b-linux.zip
           echo "NDK=${{ github.workspace }}/android-ndk-r23b" >> $GITHUB_ENV
 
-      - name: Clone Verified AOSP Repos
+      - name: Clone AOSP Repositories (Verified Android 12)
         run: |
-          # Pake r45 karena ini branch "titik temu" yang divalidasi ada
-          BRANCH="android-10.0.0_r45"
+          # Sesuai instruksi suhu: pake branch android12-release
+          BRANCH="android12-release"
           URL="https://android.googlesource.com/platform"
           
-          # Clone recovery
           git clone --depth=1 --branch $BRANCH $URL/bootable/recovery recovery
-          
-          # Clone core (di dalemnya udah ada libbase, liblog, libziparchive)
+          git clone --depth=1 --branch $BRANCH $URL/system/libbase libbase
+          git clone --depth=1 --branch $BRANCH $URL/system/logging logging
+          git clone --depth=1 --branch $BRANCH $URL/system/libziparchive libziparchive
           git clone --depth=1 --branch $BRANCH $URL/system/core core
-          
-          # Clone extras buat liblp
           git clone --depth=1 --branch $BRANCH $URL/system/extras extras
-
-          # Replikasi folder biar script build gak berubah
-          cp -r core/libbase libbase
-          cp -r core/liblog logging
-          cp -r core/libziparchive libziparchive
+          git clone --depth=1 --branch $BRANCH $URL/external/selinux selinux
           
-          ls -d recovery libbase logging core libziparchive extras
+          # Cek lokasi biar gak stat error lagi
+          ls -d recovery libbase logging libziparchive core extras selinux
 
       - name: Create Dummy Headers
         run: |
+          # Ngebisukan gtest biar gak ngerujak build-nya
           mkdir -p fake_headers/gtest
           echo "#define FRIEND_TEST(a, b)" > fake_headers/gtest/gtest_prod.h
           touch fake_headers/gtest/gtest.h
@@ -58,9 +55,10 @@ jobs:
           
           mkdir -p build_out
 
-          # Cari file .cpp (Buang test, windows, benchmark, fuzz)
+          # Filter super pedes: buang file test, windows, dan yang gak penting
+          # Di Android 12, path logging ada di logging/liblog
           RECOVERY_SRCS=$(find recovery/updater recovery/otautil recovery/applypatch -name "*.cpp" | grep -v "test" | tr '\n' ' ')
-          BASE_SRCS=$(find libbase logging libziparchive -name "*.cpp" -o -name "*.c" | grep -vE "test|benchmark|windows|fuzz" | tr '\n' ' ')
+          BASE_SRCS=$(find libbase logging/liblog libziparchive -name "*.cpp" -o -name "*.c" | grep -vE "test|benchmark|windows|fuzz" | tr '\n' ' ')
           
           $CXX -O2 -std=c++17 -static \
             -DANDROID -DANDROID_API=30 \
@@ -71,9 +69,11 @@ jobs:
             -I recovery/updater/include \
             -I recovery/otautil/include \
             -I libbase/include \
-            -I logging/include \
+            -I logging/liblog/include \
+            -I core/libcutils/include \
             -I extras/liblp/include \
             -I libziparchive/include \
+            -I selinux/libselinux/include \
             $RECOVERY_SRCS \
             $BASE_SRCS \
             -lz -ldl -lc++_static \
@@ -85,5 +85,5 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: update-binary-pijet
+          name: update-binary-rujak-bebeg
           path: build_out/update-binary
