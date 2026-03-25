@@ -1,80 +1,69 @@
-name: Build update-binary (ARM32) - STRIKE 2 (Minimalist)
+name: Build update-binary (ARM32) - STRIKE 3 (Smart Bridge)
 
 on:
   workflow_dispatch:
 
-permissions:
-  actions: write
-  contents: write
-
 jobs:
-  build-minimalist:
+  build-smart-bridge:
     runs-on: ubuntu-22.04
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 🧹 Purge Old Logs (Sesuai cara Suhu)
-        run: |
-          CURRENT_RUN_ID="${{ github.run_id }}"
-          gh run list --limit 50 --json databaseId -q '.[].databaseId' | grep -v "$CURRENT_RUN_ID" | xargs -I{} gh run delete {} || echo "Log aman."
-          # Jaga folder sakti .github dan vendor.tar.gz
-          find . -maxdepth 1 ! -name '.git' ! -name '.github' ! -name 'vendor.tar.gz' ! -name '.' -exec rm -rf {} +
-
-      - name: Setup Android NDK (r25c)
+      - name: Setup NDK (r25c)
         run: |
           wget -q https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
           unzip -q android-ndk-r25c-linux.zip
           echo "NDK=${{ github.workspace }}/android-ndk-r25c" >> $GITHUB_ENV
 
-      - name: ✍️ Create Minimalist Updater Source
+      - name: ✍️ Create Smart Updater Source
         run: |
-          # Kita bikin source C super simpel yang tugasnya cuma jalanin shell script
-          # Ini trik yang dipake banyak custom flasher modern biar gak ribet sama AOSP
           cat <<EOF > update_binary.c
           #include <stdio.h>
           #include <stdlib.h>
+          #include <string.h>
           #include <unistd.h>
 
           int main(int argc, char** argv) {
-              // Recovery ngirim 3 argumen: versi, pipe buat progress bar, sama path zip
-              if (argc != 4) {
-                  fprintf(stderr, "Usage: %s <version> <pipe> <zip>\n", argv[0]);
-                  // Tetep jalanin aja biar gak gagal
+              if (argc < 4) return 1;
+
+              char* zip_path = argv[3]; // Path file ZIP ada di argumen ke-4
+              char cmd[512];
+
+              printf("Pabrik Rujak Bebeg v3.0 starting...\n");
+              printf("ZIP: %s\n", zip_path);
+
+              // 1. Ekstrak file 'install.sh' dari dalem ZIP ke /tmp/
+              // Kita pake unzip bawaan recovery
+              sprintf(cmd, "/sbin/unzip -o %s install.sh -d /tmp/", zip_path);
+              system(cmd);
+
+              // 2. Kasih ijin eksekusi
+              system("chmod 755 /tmp/install.sh");
+
+              // 3. Jalankan script-nya dan oper argumen ZIP-nya
+              printf("Executing install.sh...\n");
+              sprintf(cmd, "/sbin/sh /tmp/install.sh %s", zip_path);
+              int res = system(cmd);
+
+              if (res == 0) {
+                  printf("Instalasi Selesai dengan Mantap!\n");
+              } else {
+                  printf("Instalasi Gagal Total, Cek Lagi Brooh!\n");
               }
 
-              printf("Starting Universal Bridge Updater...\n");
-              
-              // Strategi ala universal-flasher: 
-              // Panggil shell buat eksekusi script utama di dalem zip atau tmp
-              // Kita asumsikan script utama namanya 'updater.sh'
-              setenv("UPDATE_PACKAGE", argv[3], 1);
-              system("/sbin/sh /tmp/updater.sh");
-              
-              return 0;
+              return res;
           }
           EOF
 
       - name: 🏗️ Build Static Binary
         run: |
-          export TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64
-          export CC=$TOOLCHAIN/bin/armv7a-linux-androideabi30-clang
-          export STRIP=$TOOLCHAIN/bin/llvm-strip
-          
-          mkdir -p build_out
-          
-          # Compile STATIS total, gak butuh library macem-macem
-          $CC -O3 -static update_binary.c -o build_out/update-binary
-          
-          $STRIP build_out/update-binary
-          echo "✅ Build Sukses!"
-          ls -lh build_out/update-binary
+          export CC=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi30-clang
+          $CC -O3 -static update_binary.c -o update-binary
+          strip update-binary
 
-      - name: Upload Artifact
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: update-binary-minimalist
-          path: build_out/update-binary
+          name: update-binary-strike3
+          path: update-binary
