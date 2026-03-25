@@ -1,0 +1,111 @@
+name: Build update-binary (ARM32) - RUJAK BEBEG LEVEL 35
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  cleanup-and-build:
+    runs-on: ubuntu-22.04
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: 🗑️ Purge Workflow Logs & Releases
+        run: |
+          echo "🔥 Membakar log history dan release lama..."
+          CURRENT_RUN_ID="${{ github.run_id }}"
+          gh run list --limit 100 --json databaseId -q '.[].databaseId' \
+          | grep -v "$CURRENT_RUN_ID" \
+          | xargs -I{} gh run delete {} || echo "Log aman."
+          
+          gh release list --limit 100 --json tagName -q '.[].tagName' \
+          | xargs -I{} gh release delete {} --yes --cleanup-tag || echo "Release aman."
+
+      - name: 🧹 Runtime Cleanup (Safe Version)
+        run: |
+          echo "🧹 Membersihkan area kerja (Kecuali vendor.tar.gz & .github)..."
+          # Sekarang folder .github DAN file vendor.tar.gz aman dari amukan ulekan
+          find . -maxdepth 1 ! -name '.git' ! -name '.github' ! -name 'vendor.tar.gz' ! -name '.' -exec rm -rf {} +
+          echo "✅ Sisa file di root:"
+          ls -F
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git cmake ninja-build python3 libssl-dev pkg-config liblzma-dev libbrotli-dev
+
+      - name: Setup Android NDK (r25c)
+        run: |
+          wget -q https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
+          unzip -q android-ndk-r25c-linux.zip
+          echo "NDK=${{ github.workspace }}/android-ndk-r25c" >> $GITHUB_ENV
+
+      - name: Clone AOSP Repositories (Android 12)
+        run: |
+          BRANCH="android12-release"
+          URL="https://android.googlesource.com/platform"
+          
+          git clone --depth=1 --branch $BRANCH $URL/bootable/recovery recovery
+          git clone --depth=1 --branch $BRANCH $URL/system/libbase libbase
+          git clone --depth=1 --branch $BRANCH $URL/system/logging logging
+          git clone --depth=1 --branch $BRANCH $URL/system/libziparchive libziparchive
+          git clone --depth=1 --branch $BRANCH $URL/system/core core
+          git clone --depth=1 --branch $BRANCH $URL/system/extras extras
+          git clone --depth=1 --branch $BRANCH $URL/external/boringssl boringssl
+          git clone --depth=1 --branch $BRANCH $URL/external/brotli brotli
+          git clone --depth=1 --branch $BRANCH $URL/external/zlib zlib
+          git clone --depth=1 --branch $BRANCH $URL/external/selinux selinux
+
+      - name: Create Dummy & Fix Headers
+        run: |
+          mkdir -p fake_headers/gtest
+          mkdir -p fake_headers/utils
+          echo "#define FRIEND_TEST(a, b)" > fake_headers/gtest/gtest_prod.h
+          touch fake_headers/gtest/gtest.h
+          echo "#define LIBLOG_LOG_TAG 1000" > fake_headers/log_tag_def.h
+          echo "#define SNET_EVENT_LOG_TAG 1397638484" >> fake_headers/log_tag_def.h
+          touch fake_headers/utils/FastStrcmp.h
+
+      - name: Build update-binary
+        run: |
+          export TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64
+          export CXX=$TOOLCHAIN/bin/armv7a-linux-androideabi30-clang++
+          export STRIP=$TOOLCHAIN/bin/llvm-strip
+          
+          mkdir -p build_out
+
+          RECOVERY_SRCS=$(find recovery/updater recovery/otautil recovery/applypatch recovery/edify -name "*.cpp" | grep -vE "test|simulator|target_files" | tr '\n' ' ')
+          BASE_SRCS=$(find libbase logging/liblog libziparchive -name "*.cpp" -o -name "*.c" | grep -vE "test|benchmark|windows|fuzz|incfs" | tr '\n' ' ')
+          BROTLI_SRCS=$(find brotli/c/common brotli/c/dec -name "*.c" | tr '\n' ' ')
+          
+          $CXX -O2 -std=c++17 -static \
+            -DANDROID -DANDROID_API=30 \
+            -DRECOVERY_API_VERSION=3 \
+            -D_FILE_OFFSET_BITS=64 \
+            -include fake_headers/log_tag_def.h \
+            -I . -I fake_headers -I recovery -I recovery/include -I recovery/updater/include \
+            -I recovery/otautil/include -I recovery/edify/include -I recovery/applypatch/include \
+            -I libbase/include -I logging/liblog/include -I core/libcutils/include \
+            -I core/libsparse/include -I extras/liblp/include -I libziparchive/include \
+            -I boringssl/src/include -I brotli/c/include -I zlib \
+            $RECOVERY_SRCS $BASE_SRCS $BROTLI_SRCS \
+            -lz -ldl -lc++_static \
+            -o build_out/update-binary
+
+          $STRIP build_out/update-binary
+          ls -lh build_out/update-binary
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: update-binary-bebeg-v35
+          path: build_out/update-binary
