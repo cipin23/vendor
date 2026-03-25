@@ -1,4 +1,4 @@
-name: Build update-binary (ARM32 Android 11) - FIXED BRANCH
+name: Build update-binary (ARM32 Android 11) - FINAL FIX
 
 on:
   workflow_dispatch:
@@ -14,27 +14,24 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            git cmake ninja-build python3 \
-            libssl-dev pkg-config \
-            brotli libbrotli-dev zlib1g-dev [cite: 2, 9]
+          sudo apt-get install -y git cmake ninja-build python3 libssl-dev pkg-config brotli libbrotli-dev zlib1g-dev
 
       - name: Setup Android NDK (r23b)
         run: |
-          # Pake r23b biar aman dari error fdsan [cite: 32]
-          wget -q https://dl.google.com/android/repository/android-ndk-r23b-linux.zip [cite: 32]
-          unzip -q android-ndk-r23b-linux.zip [cite: 32]
-          echo "NDK=${{ github.workspace }}/android-ndk-r23b" >> $GITHUB_ENV [cite: 32]
+          # Turun ke r23b buat ngehindari error fdsan di Android 11
+          wget -q https://dl.google.com/android/repository/android-ndk-r23b-linux.zip
+          unzip -q android-ndk-r23b-linux.zip
+          echo "NDK=${{ github.workspace }}/android-ndk-r23b" >> $GITHUB_ENV
 
-      - name: Clone AOSP Repositories (Safe Mode)
+      - name: Clone AOSP Repositories
         run: |
-          # Pake --depth=1 biar cepet, branch disesuain yang pasti ada
-          git clone --depth=1 --branch android-11.0.0_r48 https://android.googlesource.com/platform/bootable/recovery recovery 
-          git clone --depth=1 https://android.googlesource.com/platform/system/core core 
-          git clone --depth=1 https://android.googlesource.com/platform/system/logging logging 
-          git clone --depth=1 https://android.googlesource.com/platform/system/libbase libbase 
-          git clone --depth=1 https://android.googlesource.com/platform/system/libziparchive libziparchive 
-          git clone --depth=1 https://android.googlesource.com/platform/system/extras extras 
+          # Clone core repo dengan branch r48, sisanya biarin main/master biar gak error
+          git clone --depth=1 --branch android-11.0.0_r48 https://android.googlesource.com/platform/bootable/recovery recovery
+          git clone --depth=1 https://android.googlesource.com/platform/system/core core
+          git clone --depth=1 https://android.googlesource.com/platform/system/logging logging
+          git clone --depth=1 https://android.googlesource.com/platform/system/libbase libbase
+          git clone --depth=1 https://android.googlesource.com/platform/system/libziparchive libziparchive
+          git clone --depth=1 https://android.googlesource.com/platform/system/extras extras
 
       - name: Build update-binary
         run: |
@@ -44,7 +41,7 @@ jobs:
           
           mkdir -p build_out
 
-          # Flag -I recovery buat fix applypatch.h
+          # Flag -I recovery buat benerin 'applypatch/applypatch.h'
           $CXX -O2 -std=c++17 -static \
             -DANDROID -DANDROID_API=30 \
             -DRECOVERY_API_VERSION=3 \
