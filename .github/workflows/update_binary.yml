@@ -1,32 +1,68 @@
-name: Build update-binary (ARM32) - RUJAK BEBEG LEVEL 15
+name: Build update-binary (ARM32) - RUJAK BEBEG LEVEL 25
 
 on:
   workflow_dispatch:
 
 permissions:
   actions: write
-  contents: read
+  contents: write
 
 jobs:
-  clean-and-build:
+  cleanup-and-build:
     runs-on: ubuntu-22.04
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-      - name: 🧹 Clean Old Workflow Runs
-        uses: babbel/action-delete-workflow-runs@v1
-        with:
-          github_token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          retain_days: 0
-          keep_minimum_runs: 0
-
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
+      # --- BAGIAN 1: TOTAL CLEANUP (Kecuali vendor.tar.gz) ---
+      - name: 🔥 Purge Everything Except Vendor
+        run: |
+          echo "🧹 Ngosongin isi repo kecuali vendor.tar.gz..."
+          
+          # Amankan file sakti loe ke folder temporary di luar repo
+          if [ -f "vendor.tar.gz" ]; then
+            mv vendor.tar.gz ../vendor_sakti.tar.gz
+            echo "✅ vendor.tar.gz sudah diamankan."
+          fi
+
+          # Hapus semua file & folder di root (termasuk foto/skrip lama)
+          # Hati-hati, .git gak boleh diapus biar gak putus hubungan sama GitHub
+          find . -maxdepth 1 ! -name '.git' ! -name '.' -exec rm -rf {} +
+
+          # Balikin lagi file saktinya
+          if [ -f "../vendor_sakti.tar.gz" ]; then
+            mv ../vendor_sakti.tar.gz vendor.tar.gz
+            echo "✅ vendor.tar.gz dikembalikan ke posisi semula."
+          fi
+
+          # Commit & Push biar repo loe kinclong di browser
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "chore: total cleanup by rujak bebeg [skip ci]" || echo "Repo sudah bersih."
+          git push
+
+      - name: 🗑️ Delete Workflow Runs & Releases
+        run: |
+          echo "🔥 Membakar log history dan release lama..."
+          CURRENT_RUN_ID="${{ github.run_id }}"
+          gh run list --limit 1000 --json databaseId -q '.[].databaseId' \
+          | grep -v "$CURRENT_RUN_ID" \
+          | xargs -I{} gh run delete {} || echo "Log bersih."
+          
+          gh release list --limit 1000 --json tagName -q '.[].tagName' \
+          | xargs -I{} gh release delete {} --yes --cleanup-tag || echo "Release bersih."
+
+      # --- BAGIAN 2: BUILD JURUSAN ANDROID 12 ---
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git cmake ninja-build python3 libssl-dev pkg-config
+          sudo apt-get install -y git cmake ninja-build python3 libssl-dev pkg-config liblzma-dev
 
       - name: Setup Android NDK (r25c)
         run: |
@@ -34,26 +70,23 @@ jobs:
           unzip -q android-ndk-r25c-linux.zip
           echo "NDK=${{ github.workspace }}/android-ndk-r25c" >> $GITHUB_ENV
 
-      - name: Clone AOSP Repositories (Strict Android 12)
+      - name: Clone AOSP Repositories (Android 12)
         run: |
           BRANCH="android12-release"
           URL="https://android.googlesource.com/platform"
           
-          # Repo Utama
           git clone --depth=1 --branch $BRANCH $URL/bootable/recovery recovery
           git clone --depth=1 --branch $BRANCH $URL/system/libbase libbase
           git clone --depth=1 --branch $BRANCH $URL/system/logging logging
           git clone --depth=1 --branch $BRANCH $URL/system/libziparchive libziparchive
           git clone --depth=1 --branch $BRANCH $URL/system/core core
-          
-          # Repo External (Biang kerok error header)
+          git clone --depth=1 --branch $BRANCH $URL/system/extras extras
           git clone --depth=1 --branch $BRANCH $URL/external/boringssl boringssl
           git clone --depth=1 --branch $BRANCH $URL/external/brotli brotli
-          git clone --depth=1 --branch $BRANCH $URL/external/lzma lzma
           git clone --depth=1 --branch $BRANCH $URL/external/zlib zlib
           git clone --depth=1 --branch $BRANCH $URL/external/selinux selinux
 
-      - name: Create Dummy & Fix Headers
+      - name: Create Dummy Headers
         run: |
           mkdir -p fake_headers/gtest
           mkdir -p fake_headers/utils
@@ -71,11 +104,8 @@ jobs:
           
           mkdir -p build_out
 
-          # Cari source, buang yang bikin error
           RECOVERY_SRCS=$(find recovery/updater recovery/otautil recovery/applypatch recovery/edify -name "*.cpp" | grep -vE "test|simulator|target_files" | tr '\n' ' ')
           BASE_SRCS=$(find libbase logging/liblog libziparchive -name "*.cpp" -o -name "*.c" | grep -vE "test|benchmark|windows|fuzz|incfs" | tr '\n' ' ')
-          
-          # Tambahin source brotli & lzma biar link statisnya komplit
           BROTLI_SRCS=$(find brotli/c/common brotli/c/dec -name "*.c" | tr '\n' ' ')
           
           $CXX -O2 -std=c++17 -static \
@@ -85,23 +115,10 @@ jobs:
             -include fake_headers/log_tag_def.h \
             -I . \
             -I fake_headers \
-            -I recovery \
-            -I recovery/include \
-            -I recovery/updater/include \
-            -I recovery/otautil/include \
-            -I recovery/edify/include \
-            -I recovery/applypatch/include \
-            -I libbase/include \
-            -I logging/liblog/include \
-            -I core/libcutils/include \
-            -I libziparchive/include \
-            -I boringssl/src/include \
-            -I brotli/c/include \
-            -I lzma/src/liblzma/api \
-            -I zlib \
-            $RECOVERY_SRCS \
-            $BASE_SRCS \
-            $BROTLI_SRCS \
+            -I recovery -I recovery/include -I recovery/updater/include -I recovery/otautil/include -I recovery/edify/include -I recovery/applypatch/include \
+            -I libbase/include -I logging/liblog/include -I core/libcutils/include -I core/libsparse/include -I extras/liblp/include -I libziparchive/include \
+            -I boringssl/src/include -I brotli/c/include -I zlib \
+            $RECOVERY_SRCS $BASE_SRCS $BROTLI_SRCS \
             -lz -ldl -lc++_static \
             -o build_out/update-binary
 
@@ -111,5 +128,5 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: update-binary-rujak-bebeg-final
+          name: update-binary-bebeg-final
           path: build_out/update-binary
