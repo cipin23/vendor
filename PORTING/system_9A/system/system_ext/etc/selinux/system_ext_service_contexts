@@ -1,0 +1,31 @@
+#line 1 "device/xiaomi/garden/sepolicy/private/service_contexts"
+mwis u:object_r:radio_service:s0
+imsa u:object_r:radio_service:s0
+mtkIms u:object_r:radio_service:s0
+GbaService u:object_r:radio_service:s0
+isubstub u:object_r:radio_service:s0
+wfo u:object_r:radio_service:s0
+imtksms u:object_r:radio_service:s0
+iphonesubinfotedongle u:object_r:radio_service:s0
+isubtedongle u:object_r:radio_service:s0
+simphonebooktedongle u:object_r:radio_service:s0
+ismstedongle u:object_r:radio_service:s0
+tedongleservice u:object_r:radio_service:s0
+sh u:object_r:radio_service:s0
+media.VTS u:object_r:vtservice_service:s0
+media.VTS.HiDL u:object_r:vtservice_hidl_service:s0
+#line 1 "device/lineage/sepolicy/common/private/service_contexts"
+lineageaudio                              u:object_r:lineage_audio_service:s0
+lineageglobalactions                      u:object_r:lineage_globalactions_service:s0
+lineagehardware                           u:object_r:lineage_hardware_service:s0
+lineagelivedisplay                        u:object_r:lineage_livedisplay_service:s0
+lineageperformance                        u:object_r:lineage_performance_service:s0
+lineagetrust                              u:object_r:lineage_trust_service:s0
+lineageweather                            u:object_r:lineage_weather_service:s0
+profile                                   u:object_r:lineage_profile_service:s0
+
+adbroot_service                           u:object_r:adbroot_service:s0
+applock                                   u:object_r:applock_service:s0
+pocket                                    u:object_r:pocket_service:s0
+#line 1 "device/lineage/sepolicy/common/dynamic/service_contexts"
+vendor.lineage.power.IPower/default                                u:object_r:hal_power_service:s0

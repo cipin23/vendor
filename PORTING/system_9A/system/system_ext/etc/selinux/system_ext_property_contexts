@@ -1,0 +1,10 @@
+#line 1 "device/xiaomi/garden/sepolicy/private/property_contexts"
+# MTK PQ
+vendor.sys.mtk_aal.     u:object_r:mtk_pq_prop:s0
+#line 1 "device/lineage/sepolicy/common/private/property_contexts"
+ro.telephony.use_old_mnc_mcc_format    u:object_r:exported3_default_prop:s0
+
+# Recovery update
+persist.vendor.recovery_update         u:object_r:recovery_update_prop:s0
+#line 1 "device/lineage/sepolicy/common/dynamic/property_contexts"
+vendor.camera.aux.packageexcludelist     u:object_r:exported_default_prop:s0
