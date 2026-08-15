@@ -20,9 +20,10 @@ TARGET_BOOTLOADER_BOARD_NAME := a02
 TARGET_NO_BOOTLOADER := true
 
 # ===== Kernel =====
-TARGET_KERNEL_SOURCE := kernel/samsung/a02
-TARGET_KERNEL_CONFIG := a02_defconfig
+# TARGET_KERNEL_SOURCE := kernel/samsung/a02   # dinonaktifkan, pakai prebuilt
+# TARGET_KERNEL_CONFIG := a02_defconfig   # dinonaktifkan, pakai prebuilt
 TARGET_KERNEL_ARCH := arm
+TARGET_PREBUILT_KERNEL := device/samsung/a02/prebuilt/zImage-dtb
 BOARD_KERNEL_IMAGE_NAME := zImage
 
 # ===== Partisi (sesuaikan sama layout stok a02 lo) =====
