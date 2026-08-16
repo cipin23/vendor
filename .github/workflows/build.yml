@@ -55,7 +55,7 @@ jobs:
             "$SRC_DIR/.repo/local_manifests/a02.xml"
           cat "$SRC_DIR/.repo/local_manifests/a02.xml"
 
-      - name: repo sync (full groups: default,-darwin — termasuk cts/vts)
+      - name: "repo sync (full groups: default,-darwin, termasuk cts/vts)"
         run: |
           cd "$SRC_DIR"
           repo sync -c -j$(nproc) --force-sync --no-clone-bundle --no-tags
