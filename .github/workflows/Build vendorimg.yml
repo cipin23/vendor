@@ -1,0 +1,90 @@
+name: Build vendor.img (LOS 18.1 a02)
+
+on:
+  workflow_dispatch:
+    inputs:
+      device_branch:
+        description: 'Branch device tree cipin23/vendor yang dipakai'
+        required: false
+        default: 'a13_vendor'
+
+env:
+  SRC_DIR: /mnt/lineage18.1
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350   # buffer di bawah hard limit 360 menit (6 jam)
+    steps:
+      - name: Checkout vendor repo (buat ambil postsync_fixes.sh)
+        uses: actions/checkout@v4
+
+      - name: Cek disk & bikin working dir di /mnt
+        run: |
+          df -h
+          sudo mkdir -p /mnt/lineage18.1
+          sudo chown -R "$(whoami)":"$(whoami)" /mnt/lineage18.1
+          df -h /mnt
+
+      - name: Tambah swap 8GB buat jaga-jaga Soong OOM
+        run: |
+          sudo fallocate -l 8G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          free -h
+
+      - name: Install repo tool
+        run: |
+          mkdir -p "$SRC_DIR/bin"
+          curl -f -L https://storage.googleapis.com/git-repo-downloads/repo > "$SRC_DIR/bin/repo"
+          chmod a+x "$SRC_DIR/bin/repo"
+          echo "$SRC_DIR/bin" >> "$GITHUB_PATH"
+
+      - name: repo init + local manifest
+        run: |
+          cd "$SRC_DIR"
+          repo init --depth=1 -u https://github.com/LineageOS/android.git -b lineage-18.1 --git-lfs --groups=default,-darwin
+          mkdir -p "$SRC_DIR/.repo/local_manifests"
+          sed 's/revision="lineage-18.1"/revision="${{ github.event.inputs.device_branch }}"/' \
+            "$GITHUB_WORKSPACE/.repo/local_manifests/a02.xml" > "$SRC_DIR/.repo/local_manifests/a02.xml"
+          sed -i '/a022f_kernel/d' "$SRC_DIR/.repo/local_manifests/a02.xml"
+          sed -i \
+            -e '/<remote name="rdbckp"/a\  <remote name="cipin23" fetch="https://github.com/cipin23/" />' \
+            -e 's/remote="rdbckp" revision="main"/remote="cipin23" revision="${{ github.event.inputs.device_branch }}"/' \
+            "$SRC_DIR/.repo/local_manifests/a02.xml"
+          cat "$SRC_DIR/.repo/local_manifests/a02.xml"
+
+      - name: repo sync (full groups: default,-darwin — termasuk cts/vts)
+        run: |
+          cd "$SRC_DIR"
+          repo sync -c -j$(nproc) --force-sync --no-clone-bundle --no-tags
+          df -h /mnt
+
+      - name: Bersihin .repo objects buat hemat disk
+        run: |
+          rm -rf "$SRC_DIR/.repo/project-objects"
+          df -h /mnt
+
+      - name: Jalankan postsync_fixes.sh
+        run: |
+          chmod +x "$GITHUB_WORKSPACE/.github/scripts/postsync_fixes.sh"
+          "$GITHUB_WORKSPACE/.github/scripts/postsync_fixes.sh" "$SRC_DIR"
+
+      - name: Lunch + build vendorimage
+        run: |
+          cd "$SRC_DIR"
+          source build/envsetup.sh
+          lunch lineage_a02-userdebug
+          BUILD_HOST_static=true mka vendorimage 2>&1 | tee /mnt/build_vendorimage.log
+
+      - name: Upload vendor.img
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vendor-img-a02
+          path: |
+            /mnt/lineage18.1/out/target/product/a02/vendor.img
+            /mnt/build_vendorimage.log
+          if-no-files-found: warn
+          retention-days: 7
