@@ -1,90 +1,266 @@
-name: Build vendor.img (LOS 18.1 a02)
+name: Build vendor.img - LITE (manual)
+
+# Adaptasi dari build_vendor_lite.yml, sudah include semua fix yang ditemukan
+# selama sesi debugging manual build vendor.img LOS 18.1 a02:
+#   - Masalah 1: symlink device/vendor -> convert ke folder fisik (SUDAH ada di file asli)
+#   - Masalah 3: duplikat Android.bp di source project asli -> "already defined"
+#     (BARU: rm -rf source setelah copy, di step yang sama)
+#   - VTS module type "tradefed_binary_host" tidak dikenal Soong -> disable 2 file
+#   - CTS/VTS test module undefined ("cts_defaults", "py-six", dst) karena grup
+#     cts/vts di-exclude -> disable file-file yang jadi entry point-nya
+#   - 116 modul di vendor/samsung/a02/Android.bp collision nama sama modul AOSP core
+#     (libopus, libvpx, libdrm, gatekeeper@1.0-impl, dst) -> auto-rename prefix vnda02_
+#   - Host variant mismatch (linux_glibc/windows) utk modul host_supported:true
+#     -> BUILD_HOST_static=true
 
 on:
   workflow_dispatch:
     inputs:
+      manifest_branch:
+        description: "Branch manifest LineageOS"
+        required: true
+        default: "lineage-18.1"
+      device:
+        description: "Nama device (folder di device/samsung/<device>)"
+        required: true
+        default: "a02"
+      lunch_target:
+        description: "Lunch combo (device_variant)"
+        required: true
+        default: "lineage_a02-userdebug"
+      build_target:
+        description: "Target make: vendorimage (paling kecil) / bootimage / systemimage / bacon"
+        required: true
+        default: "vendorimage"
+      local_manifest_url:
+        description: "Raw URL ke local_manifests xml kamu (device tree + kernel repo)"
+        required: true
+        default: "https://raw.githubusercontent.com/cipin23/vendor/a13_vendor/.repo/local_manifests/a02.xml"
       device_branch:
-        description: 'Branch device tree cipin23/vendor yang dipakai'
-        required: false
-        default: 'a13_vendor'
-
-env:
-  SRC_DIR: /mnt/lineage18.1
+        description: "Branch device tree cipin23/vendor yang dipakai (dipasang ke remote cipin23)"
+        required: true
+        default: "a13_vendor"
+      blob_filter_size:
+        description: "Partial clone: skip blob lebih gede dari ini kecuali dibutuhin (contoh: 10M, 20M)"
+        required: true
+        default: "10M"
 
 jobs:
-  build:
+  build-vendor-image-lite:
     runs-on: ubuntu-latest
-    timeout-minutes: 350   # buffer di bawah hard limit 360 menit (6 jam)
+    timeout-minutes: 350   # GH Actions free tier max 6 jam (360 menit) per job
+
     steps:
-      - name: Checkout vendor repo (buat ambil postsync_fixes.sh)
-        uses: actions/checkout@v4
-
-      - name: Cek disk & bikin working dir di /mnt
+      - name: Bebasin disk sebanyak mungkin
         run: |
+          echo "== Disk sebelum cleanup =="
           df -h
-          sudo mkdir -p /mnt/lineage18.1
-          sudo chown -R "$(whoami)":"$(whoami)" /mnt/lineage18.1
-          df -h /mnt
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
+            "$AGENT_TOOLSDIRECTORY" /usr/local/.ghcup \
+            /usr/share/swift /opt/az /usr/lib/jvm || true
+          sudo docker image prune --all --force || true
+          sudo apt-get clean
+          echo "== Disk sesudah cleanup =="
+          df -h
 
-      - name: Tambah swap 8GB buat jaga-jaga Soong OOM
+      - name: Install dependency build Android
         run: |
-          sudo fallocate -l 8G /mnt/swapfile
-          sudo chmod 600 /mnt/swapfile
-          sudo mkswap /mnt/swapfile
-          sudo swapon /mnt/swapfile
-          free -h
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y \
+            git-core gnupg flex bison build-essential zip curl zlib1g-dev \
+            gcc-multilib g++-multilib libc6-dev-i386 lib32ncurses-dev \
+            x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev \
+            libxml2-utils xsltproc unzip fontconfig python3 python-is-python3
 
       - name: Install repo tool
         run: |
-          mkdir -p "$SRC_DIR/bin"
-          curl -f -L https://storage.googleapis.com/git-repo-downloads/repo > "$SRC_DIR/bin/repo"
-          chmod a+x "$SRC_DIR/bin/repo"
-          echo "$SRC_DIR/bin" >> "$GITHUB_PATH"
+          mkdir -p ~/bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          echo "$HOME/bin" >> "$GITHUB_PATH"
 
-      - name: repo init + local manifest
+      - name: Setup git identity (dibutuhin repo tool)
         run: |
-          cd "$SRC_DIR"
-          repo init --depth=1 -u https://github.com/LineageOS/android.git -b lineage-18.1 --git-lfs --groups=default,-darwin
-          mkdir -p "$SRC_DIR/.repo/local_manifests"
-          sed 's/revision="lineage-18.1"/revision="${{ github.event.inputs.device_branch }}"/' \
-            "$GITHUB_WORKSPACE/.repo/local_manifests/a02.xml" > "$SRC_DIR/.repo/local_manifests/a02.xml"
-          sed -i '/a022f_kernel/d' "$SRC_DIR/.repo/local_manifests/a02.xml"
+          git config --global user.name "gh-actions"
+          git config --global user.email "actions@github.com"
+          git config --global color.ui false
+
+      - name: repo init manifest LineageOS (partial clone)
+        run: |
+          mkdir -p ~/lineage18 && cd ~/lineage18
+          repo init --depth=1 \
+            --partial-clone --clone-filter=blob:limit=${{ github.event.inputs.blob_filter_size }} \
+            -u https://github.com/LineageOS/android.git \
+            -b ${{ github.event.inputs.manifest_branch }} --git-lfs
+
+      - name: Pasang local manifest (device tree + kernel + vendor)
+        run: |
+          cd ~/lineage18
+          mkdir -p .repo/local_manifests
+          curl -f -L -o .repo/local_manifests/a02.xml.raw \
+            "${{ github.event.inputs.local_manifest_url }}"
+          # Sed transformasi yang sudah terbukti jalan (validated di Codespace sesi sebelumnya):
+          sed 's/revision="lineage-18.1"/revision="186-master"/' \
+            .repo/local_manifests/a02.xml.raw > .repo/local_manifests/a02.xml
+          sed -i '/a022f_kernel/d' .repo/local_manifests/a02.xml
           sed -i \
             -e '/<remote name="rdbckp"/a\  <remote name="cipin23" fetch="https://github.com/cipin23/" />' \
             -e 's/remote="rdbckp" revision="main"/remote="cipin23" revision="${{ github.event.inputs.device_branch }}"/' \
-            "$SRC_DIR/.repo/local_manifests/a02.xml"
-          cat "$SRC_DIR/.repo/local_manifests/a02.xml"
+            .repo/local_manifests/a02.xml
+          rm .repo/local_manifests/a02.xml.raw
+          cat .repo/local_manifests/a02.xml
 
-      - name: "repo sync (full groups: default,-darwin, termasuk cts/vts)"
+      - name: repo sync (partial clone — lebih hemat disk & waktu)
         run: |
-          cd "$SRC_DIR"
-          repo sync -c -j$(nproc) --force-sync --no-clone-bundle --no-tags
-          df -h /mnt
+          cd ~/lineage18
+          repo sync -c -j$(nproc) --force-sync --no-clone-bundle --no-tags --optimized-fetch
+          df -h
 
-      - name: Bersihin .repo objects buat hemat disk
+      - name: Ubah symlink device/vendor jadi folder asli + hapus duplikat source
         run: |
-          rm -rf "$SRC_DIR/.repo/project-objects"
-          df -h /mnt
+          cd ~/lineage18
+          # Masalah 1: <linkfile> di manifest bikin device/samsung/<device> dan
+          # vendor/samsung/<device> jadi symlink. `find` yang dipakai build system
+          # buat nyari AndroidProducts.mk TIDAK nembus symlink -> product config gagal.
+          # Masalah 3: setelah symlink dikonversi jadi copy fisik, source project asli
+          # (target symlink) masih punya Android.bp yang sama -> Soong nemuin dua kali
+          # -> "already defined". Fix: hapus source aslinya setelah di-copy.
+          for link in device/samsung/${{ github.event.inputs.device }} vendor/samsung/${{ github.event.inputs.device }}; do
+            if [ -L "$link" ]; then
+              target=$(readlink -f "$link")
+              echo "Convert symlink: $link -> $target"
+              rm "$link"
+              cp -a "$target" "$link"
+              echo "Hapus source asli ($target) biar gak duplicate module Soong"
+              rm -rf "$target"
+            else
+              echo "$link bukan symlink, skip"
+            fi
+          done
 
-      - name: Jalankan postsync_fixes.sh
+      - name: Disable module/file yang bikin Soong error (VTS module type & test-only deps)
         run: |
-          chmod +x "$GITHUB_WORKSPACE/.github/scripts/postsync_fixes.sh"
-          "$GITHUB_WORKSPACE/.github/scripts/postsync_fixes.sh" "$SRC_DIR"
+          cd ~/lineage18
+          # tradefed_binary_host: module type gak diregister di Soong config default
+          # buat vendorimage build (khusus VTS test suite variant) -> unrecognized module type.
+          # File lain: reference ke modul yang cuma didefinisikan di project grup cts/vts
+          # yang di-exclude dari sync (repo init default gak include -cts/-vts di sini)
+          # -> "depends on undefined module".
+          DISABLE_LIST=(
+            "test/vts/tools/vts-tradefed/Android.bp"
+            "test/vts/tools/vts-core-tradefed/Android.bp"
+            "external/conscrypt/apex/tests/Android.bp"
+            "system/timezone/apex/tests/Android.bp"
+            "frameworks/opt/net/wifi/tests/mts/Android.bp"
+            "frameworks/base/tests/ManagedProfileLifecycleStressTest/app/DummyDPC/Android.bp"
+            "frameworks/base/services/tests/uiservicestests/Android.bp"
+            "test/vts/testcases/host/kernel_proc_file_api_test/Android.bp"
+            "test/vts/testcases/host/fastboot_getvar/Android.bp"
+            "external/python/mock/mock/Android.bp"
+            "external/python/dateutil/dateutil/Android.bp"
+            "external/python/cryptography/src/cryptography/Android.bp"
+            "packages/apps/PermissionController/tests/inprocess/Android.bp"
+            "packages/apps/Settings/tests/unit/Android.bp"
+            "packages/modules/ExtServices/tests/Android.bp"
+            "frameworks/base/packages/PrintSpooler/tests/outofprocess/Android.bp"
+          )
+          for f in "${DISABLE_LIST[@]}"; do
+            if [ -f "$f" ]; then
+              mv "$f" "$f.disabled"
+              echo "  disabled: $f"
+            fi
+          done
+          echo "Catatan: kalau soong_build masih nemu 'undefined module' setelah ini,"
+          echo "kemungkinan ada gelombang baru yang belum ketemu sesi sebelumnya -"
+          echo "cek pesan error 'depends on undefined module' & tambahin path Android.bp-nya ke list ini."
 
-      - name: Lunch + build vendorimage
+      - name: Rename modul vendor Android.bp yang collision sama AOSP core
         run: |
-          cd "$SRC_DIR"
+          cd ~/lineage18
+          VENDOR_BP="vendor/samsung/${{ github.event.inputs.device }}/Android.bp"
+          VENDOR_MK="vendor/samsung/${{ github.event.inputs.device }}/a02-vendor.mk"
+
+          if [ ! -f "$VENDOR_BP" ]; then
+            echo "  $VENDOR_BP tidak ditemukan, skip step ini"
+          else
+            grep -oP '(?<=name: ")[a-zA-Z0-9_.@-]+(?=")' "$VENDOR_BP" | sort -u > /tmp/_vendor_module_names.txt
+            find . -name Android.bp -not -path './out/*' -not -path "./$VENDOR_BP" \
+              -exec grep -ohP '(?<=name: ")[a-zA-Z0-9_.@-]+(?=")' {} \; 2>/dev/null \
+              | sort -u > /tmp/_other_module_names.txt
+            comm -12 /tmp/_vendor_module_names.txt /tmp/_other_module_names.txt > /tmp/_collision_names.txt
+            echo "collision ditemukan: $(wc -l < /tmp/_collision_names.txt)"
+
+            python3 - "$VENDOR_BP" "$VENDOR_MK" /tmp/_collision_names.txt <<'PYEOF'
+          import re, sys
+          bp_path, mk_path, collision_path = sys.argv[1], sys.argv[2], sys.argv[3]
+          PREFIX = "vnda02_"
+          with open(collision_path) as f:
+              names = [l.strip() for l in f if l.strip()]
+          with open(bp_path) as f:
+              bp = f.read()
+          with open(mk_path) as f:
+              mk = f.read()
+          renamed, skipped, mk_updated = [], [], []
+          for name in sorted(names, key=len, reverse=True):
+              pattern = f'name: "{name}"'
+              count = bp.count(pattern)
+              if count == 0:
+                  skipped.append(name)
+                  continue
+              if count > 1:
+                  print(f"  WARNING: '{name}' muncul {count}x, skip")
+                  continue
+              new_name = PREFIX + re.sub(r'[^A-Za-z0-9_]', '_', name)
+              bp = bp.replace(pattern, f'name: "{new_name}"')
+              renamed.append((name, new_name))
+              mk_pattern = re.compile(r'(?<![A-Za-z0-9_.@-])' + re.escape(name) + r'(?![A-Za-z0-9_.@-])')
+              new_mk, n = mk_pattern.subn(new_name, mk)
+              if n > 0:
+                  mk = new_mk
+                  mk_updated.append((name, new_name, n))
+          with open(bp_path, "w") as f:
+              f.write(bp)
+          with open(mk_path, "w") as f:
+              f.write(mk)
+          print(f"  renamed: {len(renamed)}, updated di mk: {len(mk_updated)}, skip: {len(skipped)}")
+          if skipped:
+              print("   ->", skipped)
+          PYEOF
+          fi
+
+      - name: Build vendor image (mode lite)
+        env:
+          WITHOUT_CHECK_API: "true"
+          USE_CCACHE: "0"
+          BUILD_HOST_static: "true"
+        run: |
+          cd ~/lineage18
           source build/envsetup.sh
-          lunch lineage_a02-userdebug
-          BUILD_HOST_static=true mka vendorimage 2>&1 | tee /mnt/build_vendorimage.log
+          lunch ${{ github.event.inputs.lunch_target }}
+          make ${{ github.event.inputs.build_target }} -j$(nproc) 2>&1 | tee /tmp/build_vendorimage.log
 
-      - name: Upload vendor.img
+      - name: Bersihin intermediate build biar artifact upload gak ke-skip karena disk penuh
+        run: |
+          cd ~/lineage18
+          find out/target/product/${{ github.event.inputs.device }}/obj -mindepth 1 -maxdepth 1 -type d ! -name "PACKAGING" -exec rm -rf {} + 2>/dev/null || true
+          df -h
+
+      - name: Cari hasil build
+        run: |
+          cd ~/lineage18
+          find out/target/product/${{ github.event.inputs.device }} -maxdepth 1 \
+            -iname "vendor.img" -o -iname "*.zip" | tee /tmp/found_files.txt
+
+      - name: Upload hasil sebagai artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: vendor-img-a02
+          name: vendor-build-lite-${{ github.event.inputs.device }}
           path: |
-            /mnt/lineage18.1/out/target/product/a02/vendor.img
-            /mnt/build_vendorimage.log
+            /home/runner/lineage18/out/target/product/${{ github.event.inputs.device }}/vendor.img
+            /home/runner/lineage18/out/target/product/${{ github.event.inputs.device }}/*.zip
+            /tmp/build_vendorimage.log
           if-no-files-found: warn
           retention-days: 7
