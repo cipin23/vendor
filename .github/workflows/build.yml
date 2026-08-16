@@ -109,6 +109,11 @@ jobs:
             -e '/<remote name="rdbckp"/a\  <remote name="cipin23" fetch="https://github.com/cipin23/" />' \
             -e 's/remote="rdbckp" revision="main"/remote="cipin23" revision="${{ github.event.inputs.device_branch }}"/' \
             .repo/local_manifests/a02.xml
+          # repo tool <copyfile> cuma support 1 file, BUKAN direktori -> error
+          # "copying from directory not supported". device/vendor tree kita
+          # butuh copy DIREKTORI, jadi balik ke <linkfile> (symlink, support dir)
+          # lalu dikonversi jadi folder fisik di step berikutnya.
+          sed -i 's/<copyfile /<linkfile /g' .repo/local_manifests/a02.xml
           rm .repo/local_manifests/a02.xml.raw
           cat .repo/local_manifests/a02.xml
 
