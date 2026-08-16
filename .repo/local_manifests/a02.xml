@@ -4,8 +4,8 @@
 
   <!-- Satu repo aja: device tree + vendor tree di-symlink dari sini -->
   <project name="vendor" path="_rdbckp_vendor" remote="rdbckp" revision="main">
-    <linkfile src="device/samsung/a02" dest="device/samsung/a02" />
-    <linkfile src="vendor/samsung/a02" dest="vendor/samsung/a02" />
+    <copyfile src="device/samsung/a02" dest="device/samsung/a02" />
+    <copyfile src="vendor/samsung/a02" dest="vendor/samsung/a02" />
   </project>
 
   <!-- Kernel tetep repo sendiri, beda codebase, gak bisa digabung tanpa mindahin source-nya -->
