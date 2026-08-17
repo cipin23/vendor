@@ -165,7 +165,6 @@ jobs:
             "test/vts/testcases/host/fastboot_getvar/Android.bp"
             "external/python/mock/mock/Android.bp"
             "external/python/dateutil/dateutil/Android.bp"
-            "external/python/cryptography/src/cryptography/Android.bp"
             "packages/apps/PermissionController/tests/inprocess/Android.bp"
             "packages/apps/Settings/tests/unit/Android.bp"
             "packages/modules/ExtServices/tests/Android.bp"
