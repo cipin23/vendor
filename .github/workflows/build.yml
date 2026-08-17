@@ -12,6 +12,8 @@ name: Build vendor.img - LITE (manual)
 #     (libopus, libvpx, libdrm, gatekeeper@1.0-impl, dst) -> auto-rename prefix vnda02_
 #   - Host variant mismatch (linux_glibc/windows) utk modul host_supported:true
 #     -> BUILD_HOST_static=true
+#   - device/google/cuttlefish (virtual/cloud device, gak relevan buat device fisik)
+#     depends ke module "py2_only" yang undefined -> exclude seluruh subtree-nya
 
 on:
   workflow_dispatch:
@@ -118,7 +120,7 @@ jobs:
           rm .repo/local_manifests/a02.xml.raw
           cat .repo/local_manifests/a02.xml
 
-      - name: repo sync (partial clone — lebih hemat disk & waktu)
+      - name: repo sync (partial clone - lebih hemat disk & waktu)
         run: |
           cd ~/lineage18
           repo sync -c -j$(nproc) --force-sync --no-clone-bundle --no-tags --optimized-fetch
@@ -179,7 +181,7 @@ jobs:
           done < /tmp/_tradefed_files.txt
 
           # Pola berulang: HAMPIR SEMUA "undefined module" yang ditemukan berasal dari
-          # Android.bp di folder tests/, uitests/, robotests/, testcases/ — folder ini
+          # Android.bp di folder tests/, uitests/, robotests/, testcases/ - folder ini
           # gak pernah berisi modul produksi asli (beda kasus dari misal py-cryptography
           # yang justru library asli). Daripada nyusul nama file satu-satu tiap
           # ketemu yang baru, sweep SEMUA Android.bp di folder-folder ini sekaligus.
@@ -203,6 +205,26 @@ jobs:
           echo "Catatan: kalau soong_build masih nemu 'undefined module' setelah ini,"
           echo "kemungkinan ada gelombang baru yang belum ketemu sesi sebelumnya -"
           echo "cek pesan error 'depends on undefined module' & tambahin path Android.bp-nya ke list ini."
+
+      - name: Exclude device/google/cuttlefish (virtual device, gak dipake buat build device fisik)
+        run: |
+          cd ~/lineage18
+          # Error: device/google/cuttlefish/host/commands/assemble_cvd/Android.bp:67:1:
+          # "cf_bpttool" depends on undefined module "py2_only"
+          # Root cause: device/google/cuttlefish adalah source Cuttlefish (virtual/cloud
+          # device bikinan Google, x86 emulator) yang ikut ke-sync lewat manifest default
+          # group, TAPI sama sekali gak relevan buat build vendor.img device fisik Samsung
+          # A02 (arm 32-bit). Salah satu modulnya depends ke python defaults "py2_only"
+          # yang gak ada lagi di source tree/branch ini.
+          # Daripada whack-a-mole disable satu-satu module di dalam Cuttlefish (subtree ini
+          # gede & saling depends), langsung exclude semua Android.bp di bawah folder ini
+          # dari Soong.
+          if [ -d device/google/cuttlefish ]; then
+            find device/google/cuttlefish -name "Android.bp" -exec mv {} {}.disabled \;
+            echo "  disabled semua Android.bp di device/google/cuttlefish"
+          else
+            echo "  device/google/cuttlefish tidak ditemukan, skip step ini"
+          fi
 
       - name: Rename modul vendor Android.bp yang collision sama AOSP core
         run: |
