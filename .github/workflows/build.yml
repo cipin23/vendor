@@ -1,4 +1,4 @@
-name: Build vendor.img - LITE (manual)
+name: Build vendor LOS 18.1
 
 # Adaptasi dari build_vendor_lite.yml, sudah include semua fix yang ditemukan
 # selama sesi debugging manual build vendor.img LOS 18.1 a02:
@@ -177,6 +177,15 @@ jobs:
               echo "  disabled: $f"
             fi
           done
+
+          # Sapu bersih: seluruh test/vts/testcases/* sama sekali gak relevan buat
+          # vendorimage, dan banyak saling depends satu sama lain (vts-tradefed-harness
+          # dkk) -> daripada nyusul satu-satu tiap ada "undefined module" baru, matiin
+          # semua Android.bp di subtree ini sekaligus.
+          if [ -d "test/vts/testcases" ]; then
+            find test/vts/testcases -name "Android.bp" -exec mv {} {}.disabled \;
+            echo "  disabled semua Android.bp di test/vts/testcases/"
+          fi
           echo "Catatan: kalau soong_build masih nemu 'undefined module' setelah ini,"
           echo "kemungkinan ada gelombang baru yang belum ketemu sesi sebelumnya -"
           echo "cek pesan error 'depends on undefined module' & tambahin path Android.bp-nya ke list ini."
