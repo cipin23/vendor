@@ -93,7 +93,8 @@ jobs:
           repo init --depth=1 \
             --partial-clone --clone-filter=blob:limit=${{ github.event.inputs.blob_filter_size }} \
             -u https://github.com/LineageOS/android.git \
-            -b ${{ github.event.inputs.manifest_branch }} --git-lfs
+            -b ${{ github.event.inputs.manifest_branch }} --git-lfs \
+            --groups=default,-cts,-darwin
 
       - name: Pasang local manifest (device tree + kernel + vendor)
         run: |
@@ -154,6 +155,13 @@ jobs:
           # yang di-exclude dari sync (repo init default gak include -cts/-vts di sini)
           # -> "depends on undefined module".
           DISABLE_LIST=(
+            "test/vts/tools/vts-tradefed/Android.bp"
+            "test/vts/tools/vts-core-tradefed/Android.bp"
+            "test/vts/tools/vts-core-tradefed/tests/Android.bp"
+            "test/vts/harnesses/tradefed/tests/Android.bp"
+            "test/vts-testcase/kernel/api/sysfs/Android.bp"
+            "test/vts/testcases/host/kernel_proc_file_api_test/Android.bp"
+            "test/vts/testcases/host/fastboot_getvar/Android.bp"
             "external/conscrypt/apex/tests/Android.bp"
             "system/timezone/apex/tests/Android.bp"
             "frameworks/opt/net/wifi/tests/mts/Android.bp"
@@ -172,24 +180,12 @@ jobs:
               echo "  disabled: $f"
             fi
           done
-
-          # Sapu bersih SELURUH test/vts/ (bukan cuma testcases/): tradefed,
-          # vts-core-tradefed, harnesses, tools, dst -> semuanya cuma dipakai
-          # buat VTS test suite, gak relevan sama sekali buat vendorimage, dan
-          # saling depends satu sama lain (vts10-tradefed, vts-core-tradefed-harness,
-          # tradefed_binary_host module type yang gak dikenal Soong, dkk) sehingga
-          # disable per-file terus ketemu turunan baru.
-          if [ -d "test/vts" ]; then
-            find test/vts -name "Android.bp" -exec mv {} {}.disabled \;
-            echo "  disabled semua Android.bp di test/vts/"
-          fi
-          # test/vts-testcase/ (pakai dash) itu PROJECT TERPISAH dari test/vts/
-          # (lihat manifest: test/vts-testcase/kernel, /hal, /fuzz, dst masing-masing
-          # project sendiri) -> perlu disweep terpisah juga.
-          if [ -d "test/vts-testcase" ]; then
-            find test/vts-testcase -name "Android.bp" -exec mv {} {}.disabled \;
-            echo "  disabled semua Android.bp di test/vts-testcase/"
-          fi
+          echo "Catatan: TIDAK melakukan blanket-sweep direktori test/vts atau"
+          echo "test/vts-testcase, karena VtsHalProfilerDefaults/VtsHalDriverDefaults/dkk"
+          echo "didefinisikan DI DALAM subtree itu (test/vts-testcase/hal) dan dipakai"
+          echo "ratusan Android.bp HAL asli -> sweep blanket bisa hapus definisi yang"
+          echo "justru dibutuhkan. Cukup disable file spesifik yang sudah dikonfirmasi"
+          echo "error dari log."
           echo "Catatan: kalau soong_build masih nemu 'undefined module' setelah ini,"
           echo "kemungkinan ada gelombang baru yang belum ketemu sesi sebelumnya -"
           echo "cek pesan error 'depends on undefined module' & tambahin path Android.bp-nya ke list ini."
