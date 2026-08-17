@@ -154,15 +154,11 @@ jobs:
           # yang di-exclude dari sync (repo init default gak include -cts/-vts di sini)
           # -> "depends on undefined module".
           DISABLE_LIST=(
-            "test/vts/tools/vts-tradefed/Android.bp"
-            "test/vts/tools/vts-core-tradefed/Android.bp"
             "external/conscrypt/apex/tests/Android.bp"
             "system/timezone/apex/tests/Android.bp"
             "frameworks/opt/net/wifi/tests/mts/Android.bp"
             "frameworks/base/tests/ManagedProfileLifecycleStressTest/app/DummyDPC/Android.bp"
             "frameworks/base/services/tests/uiservicestests/Android.bp"
-            "test/vts/testcases/host/kernel_proc_file_api_test/Android.bp"
-            "test/vts/testcases/host/fastboot_getvar/Android.bp"
             "external/python/mock/mock/Android.bp"
             "external/python/dateutil/dateutil/Android.bp"
             "packages/apps/PermissionController/tests/inprocess/Android.bp"
@@ -177,13 +173,22 @@ jobs:
             fi
           done
 
-          # Sapu bersih: seluruh test/vts/testcases/* sama sekali gak relevan buat
-          # vendorimage, dan banyak saling depends satu sama lain (vts-tradefed-harness
-          # dkk) -> daripada nyusul satu-satu tiap ada "undefined module" baru, matiin
-          # semua Android.bp di subtree ini sekaligus.
-          if [ -d "test/vts/testcases" ]; then
-            find test/vts/testcases -name "Android.bp" -exec mv {} {}.disabled \;
-            echo "  disabled semua Android.bp di test/vts/testcases/"
+          # Sapu bersih SELURUH test/vts/ (bukan cuma testcases/): tradefed,
+          # vts-core-tradefed, harnesses, tools, dst -> semuanya cuma dipakai
+          # buat VTS test suite, gak relevan sama sekali buat vendorimage, dan
+          # saling depends satu sama lain (vts10-tradefed, vts-core-tradefed-harness,
+          # tradefed_binary_host module type yang gak dikenal Soong, dkk) sehingga
+          # disable per-file terus ketemu turunan baru.
+          if [ -d "test/vts" ]; then
+            find test/vts -name "Android.bp" -exec mv {} {}.disabled \;
+            echo "  disabled semua Android.bp di test/vts/"
+          fi
+          # test/vts-testcase/ (pakai dash) itu PROJECT TERPISAH dari test/vts/
+          # (lihat manifest: test/vts-testcase/kernel, /hal, /fuzz, dst masing-masing
+          # project sendiri) -> perlu disweep terpisah juga.
+          if [ -d "test/vts-testcase" ]; then
+            find test/vts-testcase -name "Android.bp" -exec mv {} {}.disabled \;
+            echo "  disabled semua Android.bp di test/vts-testcase/"
           fi
           echo "Catatan: kalau soong_build masih nemu 'undefined module' setelah ini,"
           echo "kemungkinan ada gelombang baru yang belum ketemu sesi sebelumnya -"
