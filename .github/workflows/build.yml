@@ -155,22 +155,9 @@ jobs:
           # yang di-exclude dari sync (repo init default gak include -cts/-vts di sini)
           # -> "depends on undefined module".
           DISABLE_LIST=(
-            "test/vts/tools/vts-core-tradefed/tests/Android.bp"
-            "test/vts/harnesses/tradefed/tests/Android.bp"
             "test/vts-testcase/kernel/api/sysfs/Android.bp"
-            "test/vts/testcases/host/kernel_proc_file_api_test/Android.bp"
-            "test/vts/testcases/host/fastboot_getvar/Android.bp"
-            "external/conscrypt/apex/tests/Android.bp"
-            "system/timezone/apex/tests/Android.bp"
-            "frameworks/opt/net/wifi/tests/mts/Android.bp"
-            "frameworks/base/tests/ManagedProfileLifecycleStressTest/app/DummyDPC/Android.bp"
-            "frameworks/base/services/tests/uiservicestests/Android.bp"
             "external/python/mock/mock/Android.bp"
             "external/python/dateutil/dateutil/Android.bp"
-            "packages/apps/PermissionController/tests/inprocess/Android.bp"
-            "packages/apps/Settings/tests/unit/Android.bp"
-            "packages/modules/ExtServices/tests/Android.bp"
-            "frameworks/base/packages/PrintSpooler/tests/outofprocess/Android.bp"
           )
           for f in "${DISABLE_LIST[@]}"; do
             if [ -f "$f" ]; then
@@ -181,9 +168,7 @@ jobs:
 
           # "tradefed_binary_host" adalah module type yang gak diregister di Soong
           # config default (khusus test-suite tooling: vts-tradefed, mts-tradefed,
-          # csuite-tradefed, atest, dst). Daripada nebak nama project satu-satu tiap
-          # ada yang baru muncul, cari SEMUA pemakainya di seluruh tree dan disable
-          # sekaligus -> gak akan pernah dibutuhin vendorimage di skenario manapun.
+          # csuite-tradefed, atest, dst). Cari SEMUA pemakainya di seluruh tree.
           echo "Cari semua Android.bp yang pakai module type tradefed_binary_host..."
           grep -rl 'tradefed_binary_host' --include=Android.bp . 2>/dev/null | grep -v '^\./out/' > /tmp/_tradefed_files.txt || true
           while IFS= read -r f; do
@@ -192,6 +177,29 @@ jobs:
               echo "  disabled (tradefed_binary_host): $f"
             fi
           done < /tmp/_tradefed_files.txt
+
+          # Pola berulang: HAMPIR SEMUA "undefined module" yang ditemukan berasal dari
+          # Android.bp di folder tests/, uitests/, robotests/, testcases/ — folder ini
+          # gak pernah berisi modul produksi asli (beda kasus dari misal py-cryptography
+          # yang justru library asli). Daripada nyusul nama file satu-satu tiap
+          # ketemu yang baru, sweep SEMUA Android.bp di folder-folder ini sekaligus.
+          # Dikecualikan: test/vts-testcase/ (folder tunggal "vts-testcase", BUKAN
+          # "testcases" -> gak kena regex ini) karena berisi definisi
+          # VtsHalProfilerDefaults/VtsHalDriverDefaults yang dibutuhin ratusan HAL
+          # Android.bp asli.
+          echo "Sweep semua Android.bp di folder tests/, uitests/, robotests/, testcases/..."
+          find . -regextype posix-extended \
+            -regex '.*/(tests|uitests|robotests|testcases)/.*Android\.bp$' \
+            -not -path './out/*' \
+            -not -path './vendor/samsung/*' \
+            -not -path './test/vts-testcase/*' \
+            2>/dev/null > /tmp/_testdir_files.txt || true
+          while IFS= read -r f; do
+            if [ -f "$f" ]; then
+              mv "$f" "$f.disabled"
+              echo "  disabled (test dir sweep): $f"
+            fi
+          done < /tmp/_testdir_files.txt
           echo "Catatan: kalau soong_build masih nemu 'undefined module' setelah ini,"
           echo "kemungkinan ada gelombang baru yang belum ketemu sesi sebelumnya -"
           echo "cek pesan error 'depends on undefined module' & tambahin path Android.bp-nya ke list ini."
