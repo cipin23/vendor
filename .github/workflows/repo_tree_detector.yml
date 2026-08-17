@@ -1,0 +1,56 @@
+name: Detect Repo Structure
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_depth:
+        description: "Max depth tree listing (0 = unlimited)"
+        required: false
+        default: "0"
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install tree
+        run: sudo apt-get update -y && sudo apt-get install -y tree
+
+      - name: Generate full repo structure
+        run: |
+          echo "## Repo: ${{ github.repository }}" > repo-structure.txt
+          echo "## Branch: ${{ github.ref_name }}" >> repo-structure.txt
+          echo "## Generated: $(date -u)" >> repo-structure.txt
+          echo "" >> repo-structure.txt
+
+          echo "## Full tree structure" >> repo-structure.txt
+          if [ "${{ github.event.inputs.max_depth }}" = "0" ]; then
+            tree -a -I ".git" >> repo-structure.txt
+          else
+            tree -a -L ${{ github.event.inputs.max_depth }} -I ".git" >> repo-structure.txt
+          fi
+
+          echo "" >> repo-structure.txt
+          echo "## Ukuran per folder (top-level, 2 level depth)" >> repo-structure.txt
+          du -ah --max-depth=2 . 2>/dev/null | sort -rh >> repo-structure.txt
+
+          echo "" >> repo-structure.txt
+          echo "## Total ukuran repo" >> repo-structure.txt
+          du -sh . >> repo-structure.txt
+
+          echo "" >> repo-structure.txt
+          echo "## Total jumlah file" >> repo-structure.txt
+          find . -path ./.git -prune -o -type f -print | wc -l >> repo-structure.txt
+
+      - name: Print to log (biar langsung keliatan di run)
+        run: cat repo-structure.txt
+
+      - name: Upload as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: repo-structure
+          path: repo-structure.txt
