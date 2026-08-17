@@ -1,4 +1,4 @@
-name: Build vendor LOS 18.1
+name: Build vendor.img - LITE (manual)
 
 # Adaptasi dari build_vendor_lite.yml, sudah include semua fix yang ditemukan
 # selama sesi debugging manual build vendor.img LOS 18.1 a02:
