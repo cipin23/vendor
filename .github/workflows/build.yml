@@ -96,7 +96,7 @@ jobs:
             --partial-clone --clone-filter=blob:limit=${{ github.event.inputs.blob_filter_size }} \
             -u https://github.com/LineageOS/android.git \
             -b ${{ github.event.inputs.manifest_branch }} --git-lfs \
-            --groups=default,-cts,-darwin
+            --groups=default,-darwin
 
       - name: Pasang local manifest (device tree + kernel + vendor)
         run: |
@@ -219,11 +219,18 @@ jobs:
           # Daripada whack-a-mole disable satu-satu module di dalam Cuttlefish (subtree ini
           # gede & saling depends), langsung exclude semua Android.bp di bawah folder ini
           # dari Soong.
-          if [ -d device/google/cuttlefish ]; then
-            find device/google/cuttlefish -name "Android.bp" -exec mv {} {}.disabled \;
-            echo "  disabled semua Android.bp di device/google/cuttlefish"
-          else
-            echo "  device/google/cuttlefish tidak ditemukan, skip step ini"
+          # Sweep pakai glob device/google/cuttlefish* biar nangkep semua varian
+          # folder (cuttlefish, cuttlefish_kernel, dst) sekaligus.
+          FOUND_ANY=0
+          for d in device/google/cuttlefish*; do
+            if [ -d "$d" ]; then
+              find "$d" -name "Android.bp" -exec mv {} {}.disabled \;
+              echo "  disabled semua Android.bp di $d"
+              FOUND_ANY=1
+            fi
+          done
+          if [ "$FOUND_ANY" = "0" ]; then
+            echo "  tidak ada folder device/google/cuttlefish*, skip step ini"
           fi
 
       - name: Rename modul vendor Android.bp yang collision sama AOSP core
@@ -279,6 +286,30 @@ jobs:
               print("   ->", skipped)
           PYEOF
           fi
+
+      - name: Kumpulkan config kunci jadi 1 artifact (buat debugging)
+        if: always()
+        run: |
+          cd ~/lineage18
+          mkdir -p /tmp/config_bundle
+          cp .repo/local_manifests/a02.xml /tmp/config_bundle/ 2>/dev/null || true
+          cp vendor/samsung/${{ github.event.inputs.device }}/Android.bp /tmp/config_bundle/vendor_Android.bp 2>/dev/null || true
+          cp vendor/samsung/${{ github.event.inputs.device }}/a02-vendor.mk /tmp/config_bundle/a02-vendor.mk 2>/dev/null || true
+          cp device/samsung/${{ github.event.inputs.device }}/BoardConfig.mk /tmp/config_bundle/BoardConfig.mk 2>/dev/null || true
+          # daftar semua file yang kena disable sepanjang step-step sebelumnya
+          find . -name "*.disabled" -not -path './out/*' > /tmp/config_bundle/disabled_files.txt 2>/dev/null || true
+          df -h > /tmp/config_bundle/disk_usage.txt
+          cd /tmp && zip -r config_bundle.zip config_bundle
+          ls -la /tmp/config_bundle.zip
+
+      - name: Upload config bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: config-bundle-${{ github.event.inputs.device }}
+          path: /tmp/config_bundle.zip
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Build vendor image (mode lite)
         env:
