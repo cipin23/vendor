@@ -298,6 +298,12 @@ jobs:
           cp device/samsung/${{ github.event.inputs.device }}/BoardConfig.mk /tmp/config_bundle/BoardConfig.mk 2>/dev/null || true
           # daftar semua file yang kena disable sepanjang step-step sebelumnya
           find . -name "*.disabled" -not -path './out/*' > /tmp/config_bundle/disabled_files.txt 2>/dev/null || true
+          # "daftar stok bahan": semua Android.bp yang MASIH AKTIF (belum didisable)
+          # di seluruh tree -> ini yang dipakai buat cross-check modul mana yang
+          # direferensikan tapi gak ada yang nyediain, tanpa nunggu Soong nemuin
+          # satu-satu di CI.
+          find . -name "Android.bp" -not -path './out/*' > /tmp/config_bundle/all_active_android_bp_paths.txt 2>/dev/null || true
+          wc -l /tmp/config_bundle/all_active_android_bp_paths.txt
           df -h > /tmp/config_bundle/disk_usage.txt
           cd /tmp && zip -r config_bundle.zip config_bundle
           ls -la /tmp/config_bundle.zip
